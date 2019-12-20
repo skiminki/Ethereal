@@ -18,6 +18,7 @@
 
 #include <assert.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -26,12 +27,15 @@
 
 TTable Table; // Global Transposition Table
 
+uint8_t *bucketChecksums = NULL;
+
 void initTT(uint64_t megabytes) {
 
     uint64_t keySize = 16ull;
 
     // Cleanup memory when resizing the table
     if (Table.hashMask) free(Table.buckets);
+    if (bucketChecksums) free(bucketChecksums);
 
     // The smallest TT size we allow is 1MB, which matches up with
     // a TT using a 15 bit lookup key. We start the key at 16, because
@@ -47,6 +51,7 @@ void initTT(uint64_t megabytes) {
     // Allocate the TTBuckets and save the lookup mask
     Table.hashMask = (1ull << keySize) - 1u;
     Table.buckets  = malloc(sizeof(TTBucket) * (1ull << keySize));
+    bucketChecksums = malloc(3 * (1ull << keySize));
 
     clearTT(); // Clear the table and load everything into the cache
 }
@@ -106,6 +111,27 @@ int valueToTT(int value, int height) {
          : value <= MATED_IN_MAX ? value - height : value;
 }
 
+uint8_t calcChecksum(int8_t depth, uint8_t generation, int16_t eval, int16_t value,
+                     uint16_t move, uint16_t hash16)
+
+{
+    uint16_t ck16 = eval ^ value ^ move ^ hash16;
+    uint8_t ck8 = depth ^ (generation & TT_MASK_BOUND) ^ (ck16 >> 8) ^ ck16;
+
+    return ck8;
+}
+
+int verifyChecksum(uint8_t ck8, size_t bucket, size_t slot)
+{
+    return (ck8 == bucketChecksums[3 * bucket + slot]);
+}
+
+void storeChecksum(uint8_t ck8, size_t bucket, size_t slot)
+{
+    bucketChecksums[3 * bucket + slot] = ck8;
+}
+
+
 int getTTEntry(uint64_t hash, uint16_t *move, int *value, int *eval, int *depth, int *bound) {
 
     const uint16_t hash16 = hash >> 48;
@@ -114,9 +140,10 @@ int getTTEntry(uint64_t hash, uint16_t *move, int *value, int *eval, int *depth,
     // Search for a matching hash signature
     for (int i = 0; i < TT_BUCKET_NB; i++) {
         if (slots[i].hash16 == hash16) {
+            uint8_t gen = Table.generation | (slots[i].generation & TT_MASK_BOUND);
 
             // Update age but retain bound type
-            slots[i].generation = Table.generation | (slots[i].generation & TT_MASK_BOUND);
+            slots[i].generation = gen;
 
             // Copy over the TTEntry and signal success
             *move  = slots[i].move;
@@ -124,7 +151,9 @@ int getTTEntry(uint64_t hash, uint16_t *move, int *value, int *eval, int *depth,
             *eval  = slots[i].eval;
             *depth = slots[i].depth;
             *bound = slots[i].generation & TT_MASK_BOUND;
-            return 1;
+
+            uint8_t ck8 = calcChecksum(*depth, gen , *eval, *value, *move, hash16);
+            return verifyChecksum(ck8, hash & Table.hashMask, i) ? 1 : -1;
         }
     }
 
@@ -162,6 +191,9 @@ void storeTTEntry(uint64_t hash, uint16_t move, int value, int eval, int depth, 
     replace->eval       = (int16_t)eval;
     replace->move       = (uint16_t)move;
     replace->hash16     = (uint16_t)hash16;
+
+    storeChecksum(calcChecksum(replace->depth, replace->generation, replace->eval, replace->value, replace->move, replace->hash16),
+                  hash & Table.hashMask, replace - slots);
 }
 
 PKEntry* getPKEntry(PKTable *pktable, uint64_t pkhash) {

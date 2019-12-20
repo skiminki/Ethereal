@@ -330,6 +330,7 @@ void uciReport(Thread *threads, int alpha, int beta, int value) {
     int depth       = threads->depth;
     int seldepth    = threads->seldepth;
     int multiPV     = threads->multiPV + 1;
+    uint64_t ttCorruptions = ttCorruptionsThreadPool(threads);
     int elapsed     = elapsedTime(threads->info);
     int bounded     = MAX(alpha, MIN(value, beta));
     uint64_t nodes  = nodesSearchedThreadPool(threads);
@@ -349,8 +350,8 @@ void uciReport(Thread *threads, int alpha, int beta, int value) {
                 : bounded <= alpha ? " upperbound " : " ";
 
     printf("info depth %d seldepth %d multipv %d score %s %d%stime %d "
-           "nodes %"PRIu64" nps %d tbhits %"PRIu64" hashfull %d pv ",
-           depth, seldepth, multiPV, type, score, bound, elapsed, nodes, nps, tbhits, hashfull);
+           "nodes %"PRIu64" nps %d tbhits %"PRIu64" hashfull %d ttcorruptions %"PRIu64" pv ",
+           depth, seldepth, multiPV, type, score, bound, elapsed, nodes, nps, tbhits, hashfull, ttCorruptions);
 
     // Iterate over the PV and print each move
     for (int i = 0; i < threads->pv.length; i++) {

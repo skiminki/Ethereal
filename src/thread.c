@@ -78,7 +78,7 @@ void newSearchThreadPool(Thread *threads, Board *board, Limits *limits, SearchIn
     for (int i = 0; i < threads->nthreads; i++) {
         threads[i].limits = limits;
         threads[i].info = info;
-        threads[i].nodes = threads[i].tbhits = 0ull;
+        threads[i].nodes = threads[i].tbhits = threads[i].ttCorruptions = 0ull;
         memcpy(&threads[i].board, board, sizeof(Board));
     }
 }
@@ -107,4 +107,17 @@ uint64_t tbhitsThreadPool(Thread *threads) {
         tbhits += threads[i].tbhits;
 
     return tbhits;
+}
+
+uint64_t ttCorruptionsThreadPool(Thread *threads) {
+
+    // Sum up the tbhit counters across each Thread. Threads have
+    // their own tbhit counters to avoid true sharing the cache
+
+    uint64_t ttCorruptions = 0u;
+
+    for (int i = 0; i < threads->nthreads; i++)
+        ttCorruptions += threads[i].ttCorruptions;
+
+    return ttCorruptions;
 }

@@ -46,6 +46,8 @@ struct Thread {
     int depth, seldepth;
     uint64_t nodes, tbhits;
 
+    uint64_t ttCorruptions;
+
     int *evalStack, _evalStack[STACK_SIZE];
     uint16_t *moveStack, _moveStack[STACK_SIZE];
     int *pieceStack, _pieceStack[STACK_SIZE];
@@ -60,6 +62,7 @@ struct Thread {
     int index, nthreads;
     Thread *threads;
     jmp_buf jbuffer;
+
 };
 
 
@@ -68,3 +71,4 @@ void resetThreadPool(Thread *threads);
 void newSearchThreadPool(Thread *threads, Board *board, Limits *limits, SearchInfo *info);
 uint64_t nodesSearchedThreadPool(Thread *threads);
 uint64_t tbhitsThreadPool(Thread *threads);
+uint64_t ttCorruptionsThreadPool(Thread *threads);

@@ -249,7 +249,7 @@ int search(Thread *thread, PVariation *pv, int alpha, int beta, int depth, int h
     }
 
     // Step 4. Probe the Transposition Table, adjust the value, and consider cutoffs
-    if ((ttHit = getTTEntry(board->hash, &ttMove, &ttValue, &ttEval, &ttDepth, &ttBound))) {
+    if ((ttHit = getTTEntry(board->hash, &ttMove, &ttValue, &ttEval, &ttDepth, &ttBound)) > 0) {
 
         ttValue = valueFromTT(ttValue, height); // Adjust any MATE scores
 
@@ -263,6 +263,11 @@ int search(Thread *thread, PVariation *pv, int alpha, int beta, int depth, int h
                 || (ttBound == BOUND_UPPER && ttValue <= alpha))
                 return ttValue;
         }
+    }
+
+    if (ttHit == -1) {
+        thread->ttCorruptions++;
+        ttHit = 0;
     }
 
     // Step 5. Probe the Syzygy Tablebases. tablebasesProbeWDL() handles all of
@@ -599,7 +604,7 @@ int qsearch(Thread *thread, PVariation *pv, int alpha, int beta, int height) {
         return evaluateBoard(board, &thread->pktable);
 
     // Step 4. Probe the Transposition Table, adjust the value, and consider cutoffs
-    if ((ttHit = getTTEntry(board->hash, &ttMove, &ttValue, &ttEval, &ttDepth, &ttBound))) {
+    if ((ttHit = getTTEntry(board->hash, &ttMove, &ttValue, &ttEval, &ttDepth, &ttBound)) > 0) {
 
         ttValue = valueFromTT(ttValue, height); // Adjust any MATE scores
 
@@ -608,6 +613,11 @@ int qsearch(Thread *thread, PVariation *pv, int alpha, int beta, int height) {
             || (ttBound == BOUND_LOWER && ttValue >= beta)
             || (ttBound == BOUND_UPPER && ttValue <= alpha))
             return ttValue;
+    }
+
+    if (ttHit == -1) {
+        thread->ttCorruptions++;
+        ttHit = 0;
     }
 
     // Save a history of the static evaluations. We can reuse a TT entry if the given
