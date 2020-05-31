@@ -30,13 +30,21 @@ enum { PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING };
 enum { MAX_PLY = 128, MAX_MOVES = 256 };
 
 enum {
-    WHITE_PAWN   =  0, BLACK_PAWN   =  1,
-    WHITE_KNIGHT =  4, BLACK_KNIGHT =  5,
-    WHITE_BISHOP =  8, BLACK_BISHOP =  9,
-    WHITE_ROOK   = 12, BLACK_ROOK   = 13,
-    WHITE_QUEEN  = 16, BLACK_QUEEN  = 17,
-    WHITE_KING   = 20, BLACK_KING   = 21,
-    EMPTY        = 26
+    WHITE_PAWN = 0,
+    WHITE_KNIGHT,
+    WHITE_BISHOP,
+    WHITE_ROOK,
+    WHITE_QUEEN,
+    WHITE_KING,
+
+    BLACK_PAWN = 8,
+    BLACK_KNIGHT,
+    BLACK_BISHOP,
+    BLACK_ROOK,
+    BLACK_QUEEN,
+    BLACK_KING,
+
+    EMPTY = 14,
 };
 
 enum {
@@ -53,21 +61,24 @@ enum {
 };
 
 static inline int pieceType(int piece) {
-    assert(0 <= piece / 4 && piece / 4 <= PIECE_NB);
-    assert(piece % 4 <= COLOUR_NB);
-    return piece / 4;
+    assert((piece >= WHITE_PAWN && piece <= WHITE_KING) ||
+           (piece >= BLACK_PAWN && piece <= BLACK_KING) ||
+           piece == EMPTY);
+    return (unsigned)piece & 7U;
 }
 
 static inline int pieceColour(int piece) {
-    assert(0 <= piece / 4 && piece / 4 <= PIECE_NB);
-    assert(piece % 4 <= COLOUR_NB);
-    return piece % 4;
+    assert((piece >= WHITE_PAWN && piece <= WHITE_KING) ||
+           (piece >= BLACK_PAWN && piece <= BLACK_KING) ||
+           piece == EMPTY);
+    return ((unsigned)piece / 8U) + (piece == EMPTY);
 }
 
 static inline int makePiece(int type, int colour) {
-    assert(0 <= type && type < PIECE_NB);
-    assert(0 <= colour && colour <= COLOUR_NB);
-    return type * 4 + colour;
+    assert(colour == WHITE || colour == BLACK);
+    assert(type >= PAWN && type <= KING);
+
+    return (unsigned)type + (unsigned)colour * 8U;
 }
 
 #define MIN(A, B) ((A) < (B) ? (A) : (B))
@@ -91,6 +102,7 @@ typedef struct PKEntry PKEntry;
 typedef struct PKTable PKTable;
 typedef struct Limits Limits;
 typedef struct UCIGoStruct UCIGoStruct;
+typedef struct BoardHashSrc BoardHashSrc;
 
 // Renamings, currently for move ordering
 

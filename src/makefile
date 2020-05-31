@@ -16,7 +16,7 @@
 
 CC      = gcc
 SRC     = *.c fathom/tbprobe.c
-LIBS    = -lpthread -lm
+LIBS    = -lpthread -lm -lcrypto
 EXE     = Ethereal
 
 WFLAGS = -std=gnu11 -Wall -Wextra -Wshadow
@@ -24,7 +24,7 @@ CFLAGS = -O3 $(WFLAGS) -DNDEBUG -flto -march=native
 RFLAGS = -O3 $(WFLAGS) -DNDEBUG -flto -static
 TFLAGS = -O3 $(WFLAGS) -DNDEBUG -flto -march=native -fopenmp -DTUNE
 PFLAGS = -O0 $(WFLAGS) -DNDEBUG -p -pg
-DFLAGS = -O0 $(WFLAGS)
+DFLAGS = -Og $(WFLAGS) -ggdb
 
 POPCNTFLAGS = -DUSE_POPCNT -msse3 -mpopcnt
 PEXTFLAGS   = $(POPCNTFLAGS) -DUSE_PEXT -mbmi2

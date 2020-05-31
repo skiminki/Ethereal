@@ -34,12 +34,6 @@
 #include "uci.h"
 #include "zobrist.h"
 
-static void updateCastleZobrist(Board *board, uint64_t oldRooks, uint64_t newRooks) {
-    uint64_t diff = oldRooks ^ newRooks;
-    while (diff)
-        board->hash ^= ZobristCastleKeys[poplsb(&diff)];
-}
-
 int castleKingTo(int king, int rook) {
     return square(rankOf(king), (rook > king) ? 6 : 2);
 }
@@ -100,10 +94,6 @@ void applyMove(Board *board, uint16_t move, Undo *undo) {
     board->history[board->numMoves++] = board->hash;
     board->fullMoveCounter++;
 
-    // Update the hash for before changing the enpass square
-    if (board->epSquare != -1)
-        board->hash ^= ZobristEnpassKeys[fileOf(board->epSquare)];
-
     // Run the correct move application function
     table[MoveType(move) >> 12](board, move, undo);
 
@@ -113,6 +103,9 @@ void applyMove(Board *board, uint16_t move, Undo *undo) {
 
     // No function updates this so we do it here
     board->turn = !board->turn;
+
+    // recalculate hash
+    board->hash = boardToHash(board);
 
     // Need king attackers to verify move legality
     board->kingAttackers = attackersToKingSquare(board);
@@ -147,16 +140,10 @@ void applyNormalMove(Board *board, uint16_t move, Undo *undo) {
 
     board->castleRooks &= board->castleMasks[from];
     board->castleRooks &= board->castleMasks[to];
-    updateCastleZobrist(board, undo->castleRooks, board->castleRooks);
 
     board->psqtmat += PSQT[fromPiece][to]
                    -  PSQT[fromPiece][from]
                    -  PSQT[toPiece][to];
-
-    board->hash    ^= ZobristKeys[fromPiece][from]
-                   ^  ZobristKeys[fromPiece][to]
-                   ^  ZobristKeys[toPiece][to]
-                   ^  ZobristTurnKey;
 
     if (fromType == PAWN || fromType == KING)
         board->pkhash ^= ZobristKeys[fromPiece][from]
@@ -173,7 +160,6 @@ void applyNormalMove(Board *board, uint16_t move, Undo *undo) {
                             & (board->turn == WHITE ? RANK_4 : RANK_5);
         if (enemyPawns) {
             board->epSquare = board->turn == WHITE ? from + 8 : from - 8;
-            board->hash ^= ZobristEnpassKeys[fileOf(from)];
         }
     }
 }
@@ -204,18 +190,11 @@ void applyCastleMove(Board *board, uint16_t move, Undo *undo) {
     board->squares[rTo]   = rFromPiece;
 
     board->castleRooks &= board->castleMasks[from];
-    updateCastleZobrist(board, undo->castleRooks, board->castleRooks);
 
     board->psqtmat += PSQT[fromPiece][to]
                    -  PSQT[fromPiece][from]
                    +  PSQT[rFromPiece][rTo]
                    -  PSQT[rFromPiece][rFrom];
-
-    board->hash    ^= ZobristKeys[fromPiece][from]
-                   ^  ZobristKeys[fromPiece][to]
-                   ^  ZobristKeys[rFromPiece][rFrom]
-                   ^  ZobristKeys[rFromPiece][rTo]
-                   ^  ZobristTurnKey;
 
     board->pkhash  ^= ZobristKeys[fromPiece][from]
                    ^  ZobristKeys[fromPiece][to];
@@ -250,11 +229,6 @@ void applyEnpassMove(Board *board, uint16_t move, Undo *undo) {
     board->psqtmat += PSQT[fromPiece][to]
                    -  PSQT[fromPiece][from]
                    -  PSQT[enpassPiece][ep];
-
-    board->hash    ^= ZobristKeys[fromPiece][from]
-                   ^  ZobristKeys[fromPiece][to]
-                   ^  ZobristKeys[enpassPiece][ep]
-                   ^  ZobristTurnKey;
 
     board->pkhash  ^= ZobristKeys[fromPiece][from]
                    ^  ZobristKeys[fromPiece][to]
@@ -291,16 +265,10 @@ void applyPromotionMove(Board *board, uint16_t move, Undo *undo) {
     undo->capturePiece   = toPiece;
 
     board->castleRooks &= board->castleMasks[to];
-    updateCastleZobrist(board, undo->castleRooks, board->castleRooks);
 
     board->psqtmat += PSQT[promoPiece][to]
                    -  PSQT[fromPiece][from]
                    -  PSQT[toPiece][to];
-
-    board->hash    ^= ZobristKeys[fromPiece][from]
-                   ^  ZobristKeys[promoPiece][to]
-                   ^  ZobristKeys[toPiece][to]
-                   ^  ZobristTurnKey;
 
     board->pkhash  ^= ZobristKeys[fromPiece][from];
 
@@ -321,13 +289,9 @@ void applyNullMove(Board *board, Undo *undo) {
     board->turn = !board->turn;
     board->history[board->numMoves++] = board->hash;
     board->fullMoveCounter++;
+    board->epSquare = -1;
 
-    // Update the hash for turn and changes to enpass square
-    board->hash ^= ZobristTurnKey;
-    if (board->epSquare != -1) {
-        board->hash ^= ZobristEnpassKeys[fileOf(board->epSquare)];
-        board->epSquare = -1;
-    }
+    board->hash = boardToHash(board);
 }
 
 void revert(Thread *thread, Board *board, uint16_t move, int height) {

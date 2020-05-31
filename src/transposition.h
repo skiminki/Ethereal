@@ -69,6 +69,18 @@ struct PKTable {
     PKEntry entries[PKT_SIZE];
 };
 
+struct BoardHashSrc {
+    uint64_t packedSquares[SQUARE_NB / 8 / 2];             // 32 bytes
+    uint8_t castleRooks[2]; // castling right white/black     34 bytes
+    int8_t  epSquare;                                      // 35 bytes
+    uint8_t turn;                                          // 36 bytes
+    uint32_t padding;                                      // 40 bytes
+};
+_Static_assert(sizeof(BoardHashSrc) == 40, "BoardHashSrc size check");
+
+void boardToBoardHashSrc(const Board *board, BoardHashSrc *boardHashSrc);
+uint64_t boardToHash(const Board *board);
+
 void initTT(uint64_t megabytes);
 int hashSizeMBTT();
 void updateTT();

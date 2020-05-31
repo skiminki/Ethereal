@@ -21,12 +21,24 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <openssl/sha.h>
+
 #if defined(__linux__)
     #include <sys/mman.h>
 #endif
 
+#include "bitboards.h"
+#include "board.h"
 #include "transposition.h"
 #include "types.h"
+#include "zobrist.h"
+
+#define XXH_NO_PREFETCH 1
+#define XXH_INLINE_ALL 1
+#define XXH_FORCE_ALIGN_CHECK 0
+#include "xxHash/xxhash.h"
+#include "xxHash/xxh3.h"
+
 
 TTable Table; // Global Transposition Table
 static const uint64_t MB = 1ull << 20;
@@ -193,4 +205,93 @@ void storePKEntry(PKTable *pktable, uint64_t pkhash, uint64_t passed, int eval) 
     pkentry->pkhash = pkhash;
     pkentry->passed = passed;
     pkentry->eval   = eval;
+}
+
+void boardToBoardHashSrc(const Board *board, BoardHashSrc *boardHashSrc)
+{
+    const uint64_t *rawBoard = (const uint64_t *)board;
+    unsigned i;
+
+    // pack the board
+    for (i = 0; i < 4; ++i)
+        boardHashSrc->packedSquares[i] = rawBoard[i * 2] | (rawBoard[i * 2 + 1] << 4);
+
+    // copy the extras
+    boardHashSrc->castleRooks[WHITE] = board->castleRooks         & 0xFFu;
+    boardHashSrc->castleRooks[BLACK] = (board->castleRooks >> 56) & 0xFFu;
+    boardHashSrc->epSquare = board->epSquare;
+    boardHashSrc->turn = board->turn;
+
+    // make sure we didn't lose information in packing
+    for (i = 0; i < 4; ++i) {
+        assert((boardHashSrc->packedSquares[i]        & 0x0F0F0F0F0F0F0F0Full) == rawBoard[i * 2]);
+        assert(((boardHashSrc->packedSquares[i] >> 4) & 0x0F0F0F0F0F0F0F0Full) == rawBoard[i * 2 + 1]);
+    }
+
+    boardHashSrc->padding = 0;
+
+    assert((boardHashSrc->castleRooks[WHITE] | (boardHashSrc->castleRooks[BLACK] * 0x0100000000000000ull)) ==
+           board->castleRooks);
+    assert(boardHashSrc->epSquare == board->epSquare);
+    assert(boardHashSrc->turn == board->turn);
+
+}
+
+uint64_t boardHashSrcToZobrist(const BoardHashSrc *hashSrc)
+{
+    unsigned int sq;
+    unsigned int i;
+    uint64_t hash = hashSrc->turn == BLACK ? ZobristTurnKey : 0;
+    uint64_t rooks = hashSrc->castleRooks[WHITE] | (hashSrc->castleRooks[BLACK] * 0x0100000000000000ull);
+
+    _Alignas(64) union {
+        uint8_t  board[SQUARE_NB];
+        uint64_t rawBoard[SQUARE_NB / 8];
+    } x;
+
+    for (i = 0; i < 4; ++i) {
+        x.rawBoard[i * 2]     =  hashSrc->packedSquares[i]       & 0x0F0F0F0F0F0F0F0Full;
+        x.rawBoard[i * 2 + 1] = (hashSrc->packedSquares[i] >> 4) & 0x0F0F0F0F0F0F0F0Full;
+    }
+
+    for (sq = 0; sq < SQUARE_NB; ++sq) {
+        const uint8_t piece = x.board[sq];
+
+        hash ^= ZobristKeys[piece][sq];
+    }
+
+    if (hashSrc->epSquare != -1)
+        hash ^= ZobristEnpassKeys[fileOf(hashSrc->epSquare)];
+
+    while (rooks) hash ^= ZobristCastleKeys[poplsb(&rooks)];
+
+    return hash;
+}
+
+uint64_t boardToHash(const Board *board)
+{
+    BoardHashSrc hashSrc;
+    boardToBoardHashSrc(board, &hashSrc);
+
+    if (0)
+        return boardHashSrcToZobrist(&hashSrc);
+    else if (0) {
+        union {
+            uint64_t hash64;
+            unsigned char sha1bytes[20];
+        } x;
+
+        SHA1((const unsigned char *)&hashSrc, 40, x.sha1bytes);
+        return x.hash64;
+    } else if (1) {
+        XXH64_hash_t hash = XXH64(&hashSrc, 32, *(const uint64_t *)hashSrc.castleRooks);
+        return hash;
+    } else if (1) {
+        XXH128_hash_t hash = XXH128(&hashSrc, 32, *(const uint64_t *)hashSrc.castleRooks);
+        return hash.low64;
+    }
+    else {
+        return 0;
+    }
+
 }

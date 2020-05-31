@@ -177,6 +177,8 @@ void boardFromFEN(Board *board, const char *fen, int chess960) {
     // is simply a hack so that FRC positions may be added to the bench.csv
     board->chess960 = chess960 || (board->castleRooks & ~StandardCastles);
 
+    board->hash = boardToHash(board);
+
     free(str);
 }
 
