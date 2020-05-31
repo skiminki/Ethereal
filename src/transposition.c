@@ -18,6 +18,7 @@
 
 #include <assert.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -39,14 +40,20 @@
 #include "xxHash/xxhash.h"
 #include "xxHash/xxh3.h"
 
+void printBoardHashSrc(const BoardHashSrc *hashSrc);
 
 TTable Table; // Global Transposition Table
 static const uint64_t MB = 1ull << 20;
+
+BoardHashSrc *verificationHashes = NULL;
+uint64_t passedLookups = 0;
+uint64_t verificationFailures = 0;
 
 void initTT(uint64_t megabytes) {
 
     // Cleanup memory when resizing the table
     if (Table.hashMask) free(Table.buckets);
+    free(verificationHashes);
 
     // Use a default keysize of 16 bits, which should be equal to
     // the smallest possible hash table size, which is 2 megabytes
@@ -65,6 +72,8 @@ void initTT(uint64_t megabytes) {
     // Otherwise, we simply allocate as usual and make no requests
     Table.buckets = malloc((1ull << keySize) * sizeof(TTBucket));
 #endif
+
+    verificationHashes = calloc(sizeof(BoardHashSrc), 3 * (1ull << keySize));
 
     // Save the lookup mask
     Table.hashMask = (1ull << keySize) - 1u;
@@ -137,7 +146,41 @@ void prefetchTTEntry(uint64_t hash) {
     __builtin_prefetch(bucket);
 }
 
-int getTTEntry(uint64_t hash, uint16_t *move, int *value, int *eval, int *depth, int *bound) {
+int verifyTTEntry(uint64_t hash, uint32_t slot, const Board *board) {
+
+    int ret = 0;
+
+    // verify retrieval
+    BoardHashSrc hashSrc;
+    boardToBoardHashSrc(board, &hashSrc);
+    const BoardHashSrc *verificationBoard = &verificationHashes[(hash & Table.hashMask) * 3 + slot];
+
+    if (memcmp(&hashSrc, verificationBoard, sizeof(BoardHashSrc)) != 0) {
+
+        ret = 1;
+
+        // skip increase if all zeroes
+        if (!(verificationBoard->packedSquares[0] == 0 &&
+              verificationBoard->packedSquares[1] == 0 &&
+              verificationBoard->packedSquares[2] == 0 &&
+              verificationBoard->packedSquares[3] == 0))
+        {
+            verificationFailures++;
+/*
+            printf("=================================\n");
+            printBoardHashSrc(&hashSrc);
+            printf("\n");
+            printBoardHashSrc(&verificationHashes[(hash & Table.hashMask) * 3 + slot]);
+*/
+        }
+    }
+
+    passedLookups++;
+
+    return ret;
+}
+
+int getTTEntry(uint64_t hash, uint16_t *move, int *value, int *eval, int *depth, int *bound, uint32_t *slot, const Board *board) {
 
     const uint16_t hash16 = hash >> 48;
     TTEntry *slots = Table.buckets[hash & Table.hashMask].slots;
@@ -145,6 +188,9 @@ int getTTEntry(uint64_t hash, uint16_t *move, int *value, int *eval, int *depth,
     // Search for a matching hash signature
     for (int i = 0; i < TT_BUCKET_NB; i++) {
         if (slots[i].hash16 == hash16) {
+
+            if (verifyTTEntry(hash, i, board))
+                return 0;
 
             // Update age but retain bound type
             slots[i].generation = Table.generation | (slots[i].generation & TT_MASK_BOUND);
@@ -155,6 +201,8 @@ int getTTEntry(uint64_t hash, uint16_t *move, int *value, int *eval, int *depth,
             *eval  = slots[i].eval;
             *depth = slots[i].depth;
             *bound = slots[i].generation & TT_MASK_BOUND;
+
+            *slot = i;
             return 1;
         }
     }
@@ -162,11 +210,11 @@ int getTTEntry(uint64_t hash, uint16_t *move, int *value, int *eval, int *depth,
     return 0;
 }
 
-void storeTTEntry(uint64_t hash, uint16_t move, int value, int eval, int depth, int bound) {
+void storeTTEntry(uint64_t hash, uint16_t move, int value, int eval, int depth, int bound, const Board *board) {
 
     int i;
     const uint16_t hash16 = hash >> 48;
-    TTEntry *slots = Table.buckets[hash & Table.hashMask].slots;
+    TTEntry *const slots = Table.buckets[hash & Table.hashMask].slots;
     TTEntry *replace = slots; // &slots[0]
 
     // Find a matching hash, or replace using MAX(x1, x2, x3),
@@ -193,6 +241,23 @@ void storeTTEntry(uint64_t hash, uint16_t move, int value, int eval, int depth, 
     replace->eval       = (int16_t)eval;
     replace->move       = (uint16_t)move;
     replace->hash16     = (uint16_t)hash16;
+
+    // store verification
+    BoardHashSrc hashSrc;
+    boardToBoardHashSrc(board, &hashSrc);
+
+    size_t slotIndex = replace - slots;
+    memcpy(&verificationHashes[(hash & Table.hashMask) * 3 + slotIndex], &hashSrc, sizeof(hashSrc));
+
+/*
+    uint32_t ttt;
+    int hit = getTTEntry(hash, &move, &value, &eval, &depth, &bound, &ttt);
+    if (!hit)
+        printf("####\n");
+    else {
+        verifyTTEntry(hash, ttt, board);
+    }
+*/
 }
 
 PKEntry* getPKEntry(PKTable *pktable, uint64_t pkhash) {
@@ -244,7 +309,7 @@ uint64_t boardHashSrcToZobrist(const BoardHashSrc *hashSrc)
     uint64_t hash = hashSrc->turn == BLACK ? ZobristTurnKey : 0;
     uint64_t rooks = hashSrc->castleRooks[WHITE] | (hashSrc->castleRooks[BLACK] * 0x0100000000000000ull);
 
-    _Alignas(64) union {
+    union {
         uint8_t  board[SQUARE_NB];
         uint64_t rawBoard[SQUARE_NB / 8];
     } x;
@@ -268,30 +333,109 @@ uint64_t boardHashSrcToZobrist(const BoardHashSrc *hashSrc)
     return hash;
 }
 
+void printBoardHashSrc(const BoardHashSrc *hashSrc)
+{
+    union {
+        uint8_t  board[SQUARE_NB];
+        uint64_t rawBoard[SQUARE_NB / 8];
+    } x;
+
+    for (unsigned i = 0; i < 4; ++i) {
+        x.rawBoard[i * 2]     =  hashSrc->packedSquares[i]       & 0x0F0F0F0F0F0F0F0Full;
+        x.rawBoard[i * 2 + 1] = (hashSrc->packedSquares[i] >> 4) & 0x0F0F0F0F0F0F0F0Full;
+    }
+
+    for (int rank=7; rank >= 0; rank--)
+    {
+        for (unsigned file = 0; file < 8; ++file)
+        {
+            char c = ' ';
+            switch (x.board[rank * 8 + file])
+            {
+                case WHITE_PAWN:   c = 'P';  break;
+                case WHITE_KNIGHT: c = 'N';  break;
+                case WHITE_BISHOP: c = 'B';  break;
+                case WHITE_ROOK:   c = 'R';  break;
+                case WHITE_QUEEN:  c = 'Q';  break;
+                case WHITE_KING:   c = 'K';  break;
+                case BLACK_PAWN:   c = 'p';  break;
+                case BLACK_KNIGHT: c = 'n';  break;
+                case BLACK_BISHOP: c = 'b';  break;
+                case BLACK_ROOK:   c = 'r';  break;
+                case BLACK_QUEEN:  c = 'q';  break;
+                case BLACK_KING:   c = 'k';  break;
+                default:
+                    if ((int)(rank * 8 + file) == hashSrc->epSquare)
+                        c = '*';
+                    break;
+            }
+
+            printf("%c", c);
+        }
+        if (!hashSrc->turn && rank == 0) printf(" O");
+        if (hashSrc->turn && rank == 7) printf(" O");
+        printf("\n");
+    }
+}
+
 uint64_t boardToHash(const Board *board)
 {
-    BoardHashSrc hashSrc;
+    _Alignas(64) BoardHashSrc hashSrc;
     boardToBoardHashSrc(board, &hashSrc);
 
-    if (0)
+    if (1)
         return boardHashSrcToZobrist(&hashSrc);
     else if (0) {
         union {
-            uint64_t hash64;
+            uint32_t hash32[5];
             unsigned char sha1bytes[20];
         } x;
 
         SHA1((const unsigned char *)&hashSrc, 40, x.sha1bytes);
-        return x.hash64;
-    } else if (1) {
+
+        return (x.hash32[0] ^ x.hash32[1] ^ x.hash32[2]) |
+            (((uint64_t)(x.hash32[1] ^ x.hash32[3])) << 32);
+
+    } else if (0) {
         XXH64_hash_t hash = XXH64(&hashSrc, 32, *(const uint64_t *)hashSrc.castleRooks);
         return hash;
-    } else if (1) {
+    } else if (0) {
         XXH128_hash_t hash = XXH128(&hashSrc, 32, *(const uint64_t *)hashSrc.castleRooks);
-        return hash.low64;
+        return hash.low64 ^ hash.high64;
     }
     else {
         return 0;
     }
 
+}
+
+void calculateHashStatistics()
+{
+    return;
+    uint64_t totalUtilizedBuckets = 0;
+    uint64_t totalUtilizedSlots = 0;
+
+    for (size_t i = 0; i <= Table.hashMask; ++i)
+    {
+        uint64_t utilizedSlots = 0;
+
+        // Search for a matching hash signature
+        for (size_t j = 0; j < TT_BUCKET_NB; j++)
+        {
+            const BoardHashSrc *verificationBoard = &verificationHashes[i * 3 + j];
+
+            utilizedSlots += (!(verificationBoard->packedSquares[0] == 0 &&
+                                verificationBoard->packedSquares[1] == 0 &&
+                                verificationBoard->packedSquares[2] == 0 &&
+                                verificationBoard->packedSquares[3] == 0));
+        }
+
+        totalUtilizedBuckets += !!utilizedSlots;
+        totalUtilizedSlots += utilizedSlots;
+    }
+    double avgO = (double)totalUtilizedSlots / totalUtilizedBuckets;
+    double hashO = (100.0 * totalUtilizedSlots) / (3 * (Table.hashMask + 1));
+    double scaledAvgO = avgO * (50 / hashO);
+    printf("Hash occupancy: %.3f %% -- average bucket occupancy: %.4f -- scaled average bucket occupancy: %.4f\n",
+           hashO, avgO, scaledAvgO);
 }

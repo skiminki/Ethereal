@@ -89,8 +89,10 @@ int hashfullTT();
 int valueFromTT(int value, int height);
 int valueToTT(int value, int height);
 void prefetchTTEntry(uint64_t hash);
-int getTTEntry(uint64_t hash, uint16_t *move, int *value, int *eval, int *depth, int *bound);
-void storeTTEntry(uint64_t hash, uint16_t move, int value, int eval, int depth, int bound);
+int verifyTTEntry(uint64_t hash, uint32_t slot, const Board *board);
+int getTTEntry(uint64_t hash, uint16_t *move, int *value, int *eval, int *depth, int *bound, uint32_t *hashSlot, const Board *board);
+void storeTTEntry(uint64_t hash, uint16_t move, int value, int eval, int depth, int bound, const Board *b);
+void calculateHashStatistics();
 
 PKEntry* getPKEntry(PKTable *pktable, uint64_t pkhash);
 void storePKEntry(PKTable *pktable, uint64_t pkhash, uint64_t passed, int eval);

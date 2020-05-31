@@ -51,6 +51,10 @@ extern volatile int IS_PONDERING; // Defined by Search.c
 pthread_mutex_t READYLOCK = PTHREAD_MUTEX_INITIALIZER;
 const char *StartPosition = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
+extern uint64_t passedLookups;
+extern uint64_t verificationFailures;
+
+
 int main(int argc, char **argv) {
 
     Board board;
@@ -126,6 +130,10 @@ int main(int argc, char **argv) {
         else if (strStartsWith(str, "print"))
             printBoard(&board), fflush(stdout);
     }
+
+    printf("Search cutoffs: %lu  verification failures: %lu  rate=%.6f%%\n",
+           passedLookups, verificationFailures,
+           100 * (double)verificationFailures / passedLookups);
 
     return 0;
 }
@@ -380,6 +388,7 @@ void uciReport(Thread *threads, int alpha, int beta, int value) {
 
     // Send out a newline and flush
     puts(""); fflush(stdout);
+    calculateHashStatistics();
 }
 
 void uciReportTBRoot(Board *board, uint16_t move, unsigned wdl, unsigned dtz) {
@@ -407,6 +416,7 @@ void uciReportCurrentMove(Board *board, uint16_t move, int currmove, int depth) 
     char moveStr[6];
     moveToString(move, moveStr, board->chess960);
     printf("info depth %d currmove %s currmovenumber %d\n", depth, moveStr, currmove);
+    calculateHashStatistics();
     fflush(stdout);
 
 }

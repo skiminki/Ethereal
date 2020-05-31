@@ -204,6 +204,7 @@ int search(Thread *thread, PVariation *pv, int alpha, int beta, int depth, int h
     uint16_t move, ttMove = NONE_MOVE, bestMove = NONE_MOVE, quietsTried[MAX_MOVES];
     MovePicker movePicker;
     PVariation lpv;
+    uint32_t hashSlot;
 
     // Step 1. Quiescence Search. Perform a search using mostly tactical
     // moves to reach a more stable position for use as a static evaluation
@@ -249,7 +250,7 @@ int search(Thread *thread, PVariation *pv, int alpha, int beta, int depth, int h
     }
 
     // Step 4. Probe the Transposition Table, adjust the value, and consider cutoffs
-    if ((ttHit = getTTEntry(board->hash, &ttMove, &ttValue, &ttEval, &ttDepth, &ttBound))) {
+    if ((ttHit = getTTEntry(board->hash, &ttMove, &ttValue, &ttEval, &ttDepth, &ttBound, &hashSlot, board))) {
 
         ttValue = valueFromTT(ttValue, height); // Adjust any MATE scores
 
@@ -288,7 +289,7 @@ int search(Thread *thread, PVariation *pv, int alpha, int beta, int depth, int h
             || (ttBound == BOUND_LOWER && value >= beta)
             || (ttBound == BOUND_UPPER && value <= alpha)) {
 
-            storeTTEntry(board->hash, NONE_MOVE, valueToTT(value, height), VALUE_NONE, depth, ttBound);
+            storeTTEntry(board->hash, NONE_MOVE, valueToTT(value, height), VALUE_NONE, depth, ttBound, board);
             return value;
         }
     }
@@ -579,7 +580,7 @@ int search(Thread *thread, PVariation *pv, int alpha, int beta, int depth, int h
     if (!RootNode || !thread->multiPV) {
         ttBound = best >= beta    ? BOUND_LOWER
                 : best > oldAlpha ? BOUND_EXACT : BOUND_UPPER;
-        storeTTEntry(board->hash, bestMove, valueToTT(best, height), eval, depth, ttBound);
+        storeTTEntry(board->hash, bestMove, valueToTT(best, height), eval, depth, ttBound, board);
     }
 
     return best;
@@ -594,6 +595,7 @@ int qsearch(Thread *thread, PVariation *pv, int alpha, int beta, int height) {
     uint16_t move, ttMove = NONE_MOVE;
     MovePicker movePicker;
     PVariation lpv;
+    uint32_t hashSlot;
 
     // Prefetch TT as early as reasonable
     prefetchTTEntry(board->hash);
@@ -620,7 +622,7 @@ int qsearch(Thread *thread, PVariation *pv, int alpha, int beta, int height) {
         return evaluateBoard(board, &thread->pktable, thread->contempt);
 
     // Step 4. Probe the Transposition Table, adjust the value, and consider cutoffs
-    if ((ttHit = getTTEntry(board->hash, &ttMove, &ttValue, &ttEval, &ttDepth, &ttBound))) {
+    if ((ttHit = getTTEntry(board->hash, &ttMove, &ttValue, &ttEval, &ttDepth, &ttBound, &hashSlot, board))) {
 
         ttValue = valueFromTT(ttValue, height); // Adjust any MATE scores
 
